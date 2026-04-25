@@ -6,6 +6,4 @@ ENV/
 __pycache__/
 *.pyc
 *.exe
-data/processed/*.csv
-data/simulated/*.csv
-data/outputs/*.csv
+AGENTS.md

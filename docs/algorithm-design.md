@@ -78,7 +78,7 @@ quality_score = normalize(
 
 - 稀疏兴趣向量：`vector<pair<int, double>>` 或定长 `vector<double>`。
 - 用户倒排索引：`topic/tag -> users`。
-- 小根堆：保留 Top-K 相似用户。
+- 小顶堆：保留 Top-K 相似用户。
 
 **算法步骤：**
 
@@ -86,7 +86,7 @@ quality_score = normalize(
 2. 对观看比例、点赞、收藏、投币、分享赋予不同权重。
 3. 使用倒排索引找到候选相似用户，而不是扫描全部用户。
 4. 计算目标用户与候选用户的余弦相似度。
-5. 用小根堆维护 Top-K。
+5. 用小顶堆维护 Top-K。
 
 **兴趣增量建议：**
 
@@ -120,7 +120,7 @@ recommend_score =
     0.45 * interest_match
   + 0.25 * collaborative_score
   + 0.20 * quality_score
-  + 0.10 * freshness_score
+  + 0.10 * freshness_score   冷启动
 ```
 
 **核心结构：**
