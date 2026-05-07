@@ -1,16 +1,26 @@
 # 数据结构与数据表设计
 
-本文说明项目中核心 CSV 文件、内存结构和后续 F3-F7 分析之间的关系。当前数据流分为两层：
+本文说明项目中核心 CSV 文件、内存结构和后续 F3-F7 分析之间的关系。当前数据流分为三层：
 
 - F1 数据构建：读取原始视频元数据，输出 `data/processed/videos.csv`。
 - F2 行为模拟：读取清洗后的视频表，输出 `data/simulated/users.csv` 和 `data/simulated/events.csv`。
+- 向量构建：读取 `videos.csv`、`users.csv`、`events.csv`，输出 `data/outputs` 下的用户兴趣向量、视频受众向量和统一视频特征向量。
 
-三张核心表可以简单理解为：
+前三张基础表可以简单理解为：
 
 ```text
 videos.csv：有哪些视频、视频属于什么主题、质量如何。
 users.csv：有哪些用户、用户偏好什么主题、活跃度如何。
 events.csv：哪个用户在什么时间看了哪个视频、看了多久、有没有点赞收藏投币分享。
+## 用户在模拟的时候被预先编入12个group，有观看记录的视频至少拥有十条观看记录。
+```
+
+在这三张基础表之上，当前又新增了三张向量表：
+
+```text
+user_interest_vectors.csv：每个用户对 12 个主题的实际兴趣分布。
+video_audience_vectors.csv：每个视频被 12 个用户群体喜欢的程度。
+video_feature_vectors.csv：用于后续推荐和聚类的统一视频特征向量。
 ```
 
 ## 原始视频表 `raw_videos`
@@ -55,15 +65,15 @@ video_id,bvid,title,category_id,category_name,tag_ids,duration_sec,publish_ts,ra
 | `bvid` | string | B 站 BV 号。 | 保留可读、可追溯的视频标识，方便展示和人工检查。 |
 | `title` | string | 视频标题。 | 既方便展示，也能在清洗阶段辅助主题识别。 |
 | `category_id` | int | 分类字符串映射后的整数编号。 | 字符串不适合频繁计算，转成整数后可作为数组、哈希表或向量维度的索引。 |
-| `category_name` | string | 原始分类名。 | 保留可读分类，便于报告、答辩和结果解释。 |
+| `category_name` | string | 原始分类名。 
 | `tag_ids` | string | 标签编号集合，当前 CSV 中用 `;` 分隔。 | 标签是推荐召回的重要依据，编号后可建立 `tagToVideos` 倒排索引。 |
 | `duration_sec` | int | 视频时长，单位秒。 | 用于生成 `watch_sec`，并计算 `watch_ratio` 和 `is_finish`。 |
 | `publish_ts` | long long | 发布时间，Unix 时间戳。 | 保证行为时间不早于视频发布时间，并支持按时间窗口做热度预测。 |
-| `raw_view_count` | long long | 原始播放量。 | 作为视频质量分和基础曝光倾向的重要来源。 |
-| `raw_like` | long long | 原始点赞数。 | 用于计算点赞率，也影响模拟点赞概率。 |
-| `raw_favorite` | long long | 原始收藏数。 | 收藏比点赞更能体现内容价值，因此参与质量分和反馈概率。 |
-| `raw_coin` | long long | 原始投币数。 | 投币是高强度正反馈，用于体现视频被认可程度。 |
-| `raw_share` | long long | 原始分享数。 | 分享代表传播意愿和扩散能力。 |
+| `raw_view_count` | long long | 原始播放量。 
+| `raw_like` | long long | 原始点赞数。 
+| `raw_favorite` | long long | 原始收藏数。
+| `raw_coin` | long long | 原始投币数。 
+| `raw_share` | long long | 原始分享数。 
 | `quality_score` | double | 归一化后的视频质量分，范围约为 0 到 1。 | 用来控制基础曝光，质量高的视频在模拟推荐时更容易被选中。 |
 | `topic_id` | int | 视频主主题编号。 | 方便把视频放入主题候选池，避免每次模拟都扫描全量视频。 |
 | `topic_vector` | string | 视频主题向量，当前 CSV 中用 `;` 分隔多个浮点数。 | 用于和用户兴趣向量做点积，得到 `match_score`；也可作为 F6 视频聚类输入。 |
@@ -112,7 +122,7 @@ user_id,group_id,primary_topic,secondary_topic,activity_level,planned_events
 | 字段 | 类型 | 说明 | 为什么要设置 |
 | --- | --- | --- | --- |
 | `user_id` | int | 用户唯一编号。 | 作为用户主键，`events.csv` 通过它关联用户。 |
-| `group_id` | int | 模拟时分配的兴趣群体。 | 作为用户聚类的“模拟真值”，便于后续验证 F7 的聚类效果。 |
+| `group_id` | int | 模拟时分配的兴趣群体。 | 作为用户聚类的“模拟真值”，便于后续验证 F7 的聚类效果, ****注意group_id和primary_topic是同一个**** |
 | `primary_topic` | int | 用户最偏好的主题。 | 让用户行为具有稳定主兴趣，避免行为完全随机。 |
 | `secondary_topic` | int | 用户次偏好的主题。 | 让用户兴趣更接近真实情况，不局限于单一主题。 |
 | `activity_level` | double | 用户活跃度。 | 用于描述用户行为强度，高活跃用户通常产生更多行为。 |
@@ -120,17 +130,34 @@ user_id,group_id,primary_topic,secondary_topic,activity_level,planned_events
 
 ### 用户兴趣向量说明
 
-代码内部会为每个用户生成 `interest_vector`，但当前 `users.csv` 没有直接落盘该字段。当前 CSV 保留 `primary_topic` 和 `secondary_topic`，它们足以解释用户主兴趣和次兴趣；内存中的 `interest_vector` 用于模拟阶段计算用户和视频的匹配分。
+
+现在项目把“基于真实行为反推的用户兴趣向量”生成为：
+
+```text
+data/outputs/user_interest_vectors.csv
+```
+
+当前表头为：
+
+```text
+user_id,group_id,event_count,interest_vector
+```
+
+其中 `interest_vector` 是一个 12 维向量，按下面的方式生成：
+
+```text
+user_interest[topic] += event.feedback_score * video.topic_vector[topic]
+```
+
+最后对 12 个维度按总和归一化，使其更适合做 F3 相似用户分析、F4 个性化推荐和 F7 用户聚类。
 
 用户兴趣向量的基本设计是：
 
 ```text
-primary_topic: 0.55 - 0.75
+primary_topic: 0.55 - 0.75 
 secondary_topic: 0.15 - 0.30
-other_topics: share remaining weight
+other_topics: share remaining weight（均分）
 ```
-
-这样做的原因是：用户既有明确偏好，又不会机械地只看一种视频。后续如果 F3/F7 需要直接从 CSV 复现完整兴趣向量，可以增加 `interest_vector` 字段，或根据行为日志重新统计用户兴趣。
 
 ### 活跃度设计原因
 
@@ -192,7 +219,84 @@ feedback_score =
   + 2.5 * is_share
 ```
 
-这样设计的原因是：观看比例是基础兴趣，完播是更强兴趣，点赞是正反馈，收藏、投币、分享代表更高强度的认可或传播意愿。
+
+## 视频受众向量与统一特征向量
+
+在 `videos.csv` 和 `events.csv` 的基础上，当前项目又生成了两类和视频相关的向量。
+
+### 视频受众向量 `data/outputs/video_audience_vectors.csv`
+
+当前表头为：
+
+```text
+video_id,event_count,has_audience,audience_vector
+```
+
+其中：
+
+- `event_count` 表示该视频在 `events.csv` 中出现了多少次。
+- `has_audience` 表示该视频是否有足够行为样本来可靠使用受众向量。
+- `audience_vector` 是一个 12 维向量，12 个维度对应 12 个 `group_id`。
+
+它的生成方式是：
+
+```text
+video_audience[user.group_id] += event.feedback_score
+```
+
+最后按总和归一化，使其表示“这个视频主要被哪类用户喜欢”。
+
+当前使用的门槛是：
+
+```text
+event_count >= 10 -> has_audience = 1
+event_count < 10  -> has_audience = 0
+```
+
+这样做的原因是：行为太少时，受众结构容易被偶然点击污染，不适合直接参与 F6 视频聚类或相似视频推荐。
+
+### 统一视频特征向量 `data/outputs/video_feature_vectors.csv`
+
+当前表头为：
+
+```text
+video_id,topic_id,event_count,has_audience,feature_vector
+```
+
+`feature_vector` 是一个 26 维向量，由以下部分组成：
+
+```text
+12 维 topic_vector
+12 维 audience_vector
+1 维 quality_score
+1 维 duration_score
+```
+
+其中：
+
+- 前 12 维是视频内容主题。
+- 中间 12 维是视频受众分布。
+- 倒数第 2 维是 `quality_score`。
+- 倒数第 1 维是对 `duration_sec` 做归一化后的时长特征。
+
+当前使用两套权重：
+
+```text
+有足够行为时：
+topic_weight = 0.60
+audience_weight = 0.25
+quality_weight = 0.10
+duration_weight = 0.05
+
+没有足够行为时：
+topic_weight = 0.85
+audience_weight = 0.00
+quality_weight = 0.10
+duration_weight = 0.05
+```
+
+最后整个 `feature_vector` 会做 L2 归一化。这样后续做余弦相似度时，可以直接用点积，减少每次推荐和聚类时重复计算多种 similarity 函数的开销。  
+**注意category和tag没有直接加入向量中，topic本身就考虑了category，tag，title。** 后续的倒排索引仍然可以使用category和tag。
 
 ## 三张表之间的关系
 
@@ -213,33 +317,56 @@ videos.video_id -> events.video_id
 
 ## 分析中间结构
 
-这些结构不一定全部直接落盘，但它们是后续 F3-F7 的核心数据结构。
+这些结构不一定全部直接落盘，但它们是后续 F3-F7 的核心数据结构。当前代码已经提供了三组可复用接口：视频目录构建接口、行为模拟接口、向量构建接口。后续实现 F3-F7 时，应优先复用这些结构，而不是重新解析同一批 CSV 字段。
 
 | 结构 | 来源 | 用途 |
 | --- | --- | --- |
-| `vector<Video>` | `videos.csv` | 连续存储视频，便于遍历、随机采样和向量计算。 |
-| `unordered_map<long long, int> videoIdToIndex` | `videos.csv` | 从 `video_id` 快速定位 `vector<Video>` 下标。 |
-| `unordered_map<string, int> categoryToId` | 视频清洗阶段 | 把分类名压缩成整数编号。 |
-| `unordered_map<string, int> tagToId` | 视频清洗阶段 | 把标签名压缩成整数编号。 |
-| `unordered_map<int, vector<int>> tagToVideos` | `tag_ids` | 标签倒排索引，用于推荐候选召回。 |
-| `vector<vector<int>> topicToVideos` | `topic_id` | 主题到视频候选池，避免模拟时扫描全量视频。 |
-| `vector<User>` | `users.csv` | 连续存储用户画像。 |
-| `vector<Event>` | `events.csv` | 行为日志主表。 |
-| `unordered_map<int, vector<int>> userEvents` | `events.csv` | 用户 ID 到行为下标列表，用于 F3/F4/F7。 |
-| `unordered_map<long long, vector<int>> videoEvents` | `events.csv` | 视频 ID 到行为下标列表，用于 F5/F6。 |
-| `vector<vector<double>> userInterestMatrix` | `users.csv` 或 `events.csv` | 用户兴趣矩阵，用于相似用户和用户聚类。 |
-| `vector<vector<double>> videoAudienceMatrix` | `events.csv` | 视频受众向量，用于视频聚类。 |
+| `RawVideo` | `data/raw/bilibili_10w_pro.csv` | 原始视频记录，保留 `aid`、`title`、`category`、`tag`、播放量和互动数，是 F1 清洗入口。 |
+| `ModeledVideo` | `data/processed/videos.csv` | 规范化视频记录，保存 `category_id`、`tag_ids`、`quality_score`、`topic_id`、`topic_vector`，是 F4/F5/F6 的基础视频对象。 |
+| `Catalog` | `load_processed_videos()` 或 `build_catalog()` | 视频目录对象，内部包含 `vector<ModeledVideo>`、`topic_to_video_indices`、`category_to_id`、`tag_to_id`。 |
+| `vector<ModeledVideo>` | `Catalog.videos` | 连续存储全量视频，便于遍历、向量构建、热度统计和聚类输入构造。 |
+| `vector<vector<int>> topic_to_video_indices` | `Catalog.topic_to_video_indices` | 主题到视频下标列表，可直接作为 F4 推荐的主题候选池，也可减少相似视频召回时的全量扫描。 |
+| `unordered_map<string, int> category_to_id` | `Catalog.category_to_id` | 把分类名压缩成整数编号，后续可扩展为 `category_id -> video_ids` 候选召回索引。 |
+| `unordered_map<string, int> tag_to_id` | `Catalog.tag_to_id` | 把标签名压缩成整数编号，后续可扩展为 `tag_id -> video_ids` 倒排索引。 |
+| `UserProfile` | `generate_users()` 或 `users.csv` | 模拟用户画像，保存 `group_id`、`primary_topic`、`secondary_topic`、`activity_level` 和内存态 `interest_vector`。 |
+| `Event` | `simulate_events()` 或 `events.csv` | 行为日志对象，保存 `user_id`、`video_id`、`timestamp`、观看比例、强反馈和 `feedback_score`。 |
+| `unordered_map<int, vector<int>> userEvents` | 可由 `events.csv` 或 `vector<Event>` 构建 | 用户 ID 到行为下标列表，用于 F3 相似用户、F4 个性化推荐和 F7 用户聚类。 |
+| `unordered_map<long long, vector<int>> videoEvents` | 可由 `events.csv` 或 `vector<Event>` 构建 | 视频 ID 到行为下标列表，用于 F5 热度预测和 F6 视频受众统计。 |
+| `UserInterestVector` | `build_vectors()` 或 `user_interest_vectors.csv` | 用户 12 维兴趣向量，由 `feedback_score * topic_vector` 累积得到，是 F3/F4/F7 的主要输入。 |
+| `VideoAudienceVector` | `build_vectors()` 或 `video_audience_vectors.csv` | 视频 12 维受众向量，由用户 `group_id` 上的反馈分布构成，是 F6 视频聚类和相似视频推荐的行为侧输入。 |
+| `VideoFeatureVector` | `build_vectors()` 或 `video_feature_vectors.csv` | 26 维统一视频特征，融合主题、受众、质量分和时长，已做 L2 归一化，可用于 F4 排序和 F6 聚类。 |
+| `VectorBuildResult` | `build_vectors()` | 一次性返回用户兴趣向量、视频受众向量和统一视频特征向量，适合作为 F3-F7 的共享预处理结果。 |
 | `priority_queue` | 推荐、相似度、热度模块 | 维护 Top-K 相似用户、Top-N 推荐视频或热门视频。 |
+
+当前可直接复用的关键接口如下：
+
+| 接口 | 所在文件 | 输入 | 输出 | 对 F3-F7 的帮助 |
+| --- | --- | --- | --- | --- |
+| `split_tags(raw_tags)` | `src/data_builder/video_cleaner.hpp` | 原始标签字符串 | 标签字符串列表 | 支持 F4 建立标签倒排索引。 |
+| `load_raw_videos(csv_path, max_rows)` | `src/data_builder/video_cleaner.hpp` | 原始视频 CSV | `vector<RawVideo>` | 支持重新生成 F1 视频目录。 |
+| `build_catalog(raw_videos, config)` | `src/data_builder/video_cleaner.hpp` | 原始视频列表 | `Catalog` | 生成 `topic_vector`、`topic_id`、`tag_ids`、`quality_score`，是 F4/F6 的视频基础特征来源。 |
+| `load_processed_videos(csv_path, config)` | `src/data_builder/video_cleaner.hpp` | `data/processed/videos.csv` | `Catalog` | 后续 F3-F7 推荐优先使用该接口读取已清洗视频，避免重复处理原始 CSV。 |
+| `write_videos_csv(path, catalog)` | `src/data_builder/video_cleaner.hpp` | `Catalog` | `videos.csv` | 支持持久化 F1 清洗结果。 |
+| `generate_users(config)` | `src/simulator/behavior_simulator.hpp` | `SimulationConfig` | `vector<UserProfile>` | 生成有 `group_id` 和兴趣向量的用户画像，可用于 F7 聚类验证。 |
+| `simulate_events(catalog, users, config)` | `src/simulator/behavior_simulator.hpp` | 视频目录、用户画像、模拟配置 | `vector<Event>` | 生成带 `feedback_score` 的行为日志，是 F3/F4/F5/F6/F7 的行为数据来源。 |
+| `write_users_csv(path, users)` | `src/simulator/behavior_simulator.hpp` | `vector<UserProfile>` | `users.csv` | 持久化用户画像和聚类真值 `group_id`。 |
+| `write_events_csv(path, events)` | `src/simulator/behavior_simulator.hpp` | `vector<Event>` | `events.csv` | 持久化行为日志，供 F3-F7 重复使用。 |
+| `load_vector_users_csv(path)` | `src/common/vector_builder.hpp` | `users.csv` | `vector<VectorUser>` | 读取 `user_id` 与 `group_id`，用于构建受众向量和聚类验证。 |
+| `load_vector_events_csv(path)` | `src/common/vector_builder.hpp` | `events.csv` | `vector<VectorEvent>` | 读取 `user_id`、`video_id`、`feedback_score`，用于兴趣和受众向量构建。 |
+| `build_vectors(catalog, users, events, config)` | `src/common/vector_builder.hpp` | `Catalog`、用户、行为、向量配置 | `VectorBuildResult` | 统一生成 `UserInterestVector`、`VideoAudienceVector`、`VideoFeatureVector`，是 F3/F4/F6/F7 的核心预处理接口。 |
+| `write_user_interest_vectors_csv(path, vectors)` | `src/common/vector_builder.hpp` | 用户兴趣向量 | `user_interest_vectors.csv` | 为 F3/F4/F7 提供可复用的落盘输入。 |
+| `write_video_audience_vectors_csv(path, vectors)` | `src/common/vector_builder.hpp` | 视频受众向量 | `video_audience_vectors.csv` | 为 F6 和相似视频推荐提供行为侧视频特征。 |
+| `write_video_feature_vectors_csv(path, vectors)` | `src/common/vector_builder.hpp` | 视频统一特征向量 | `video_feature_vectors.csv` | 为 F4 推荐排序和 F6 KMeans 聚类提供预计算向量。 |
 
 ## 对 F3-F7 的支撑关系
 
 | 功能 | 主要使用的数据 | 说明 |
 | --- | --- | --- |
-| F3 相似用户 | `users.csv`、`events.csv` | 根据用户兴趣主题和行为反馈计算用户相似度。 |
-| F4 视频推荐 | `videos.csv`、`events.csv` | 用主题匹配、标签倒排、视频质量分和历史反馈生成推荐。 |
+| F3 相似用户 | `user_interest_vectors.csv`、`events.csv` | 根据用户兴趣向量和行为反馈计算用户相似度。 |
+| F4 视频推荐 | `videos.csv`、`user_interest_vectors.csv`、`video_feature_vectors.csv` | 用主题匹配、标签/分类召回、统一视频特征和历史反馈生成推荐。 |
 | F5 热度预测 | `events.csv.timestamp`、`events.csv.video_id` | 按时间窗口统计视频观看量，预测未来趋势。 |
-| F6 视频聚类 | `videos.csv.topic_vector`、`events.csv` | 根据内容主题或观看用户群体聚类视频。 |
-| F7 用户聚类 | `users.csv`、`events.csv` | 根据用户兴趣主题和行为偏好聚类用户。 |
+| F6 视频聚类 | `video_feature_vectors.csv`、`video_audience_vectors.csv` | 根据视频内容主题和观看用户群体做统一聚类。 |
+| F7 用户聚类 | `user_interest_vectors.csv`、`events.csv` | 根据用户兴趣向量和行为偏好聚类用户。 |
 
 ## 输出文件
 
@@ -248,6 +375,9 @@ videos.video_id -> events.video_id
 | `data/processed/videos.csv` | F1 规范化后的视频表。 | 已由数据清洗模块生成。 |
 | `data/simulated/users.csv` | F2 模拟用户画像。 | 已由行为模拟模块生成。 |
 | `data/simulated/events.csv` | F2 模拟行为日志。 | 已由行为模拟模块生成。 |
+| `data/outputs/user_interest_vectors.csv` | 用户兴趣向量表。 | 已由向量构建模块生成。 |
+| `data/outputs/video_audience_vectors.csv` | 视频受众向量表。 | 已由向量构建模块生成。 |
+| `data/outputs/video_feature_vectors.csv` | 统一视频特征向量表。 | 已由向量构建模块生成。 |
 | `data/outputs/recommendations.csv` | F4 推荐结果。 | 后续生成。 |
 | `data/outputs/user_clusters.csv` | F7 用户聚类结果。 | 后续生成。 |
 | `data/outputs/video_clusters.csv` | F6 视频聚类结果。 | 后续生成。 |
