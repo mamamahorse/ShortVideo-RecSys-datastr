@@ -7,3 +7,5 @@ __pycache__/
 *.pyc
 *.exe
 AGENTS.md
+.agent/
+.agents/
