@@ -36,6 +36,7 @@ $targets = @(
         )
     },
     @{
+<<<<<<< HEAD
         Name = "test_behavior_simulator"
         Output = "tests\test_behavior_simulator.exe"
         Sources = @(
@@ -50,6 +51,13 @@ $targets = @(
         Sources = @(
             "tests\test_vector_builder.cpp",
             "src\common\vector_builder.cpp",
+=======
+        Name = "predict_popularity"
+        Output = "src\popularity\predict_popularity.exe"
+        Sources = @(
+            "src\popularity\predict_popularity.cpp",
+            "src\popularity\popularity_predictor.cpp",
+>>>>>>> 6724422 (实现了f5热度预测功能)
             "src\data_builder\video_cleaner.cpp"
         )
     }
